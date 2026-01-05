@@ -1,0 +1,30 @@
+El tamaño de los terrenos son "fijos", dadu una distancia o preferencia no puedo ajustarlo para calzar la utilidad
+el bid rent es relevante ¿por uqe?
+
+lluvia de ideas:
+- cada modulo debe ser como una caja negra de entradas y salidas
+- hay que definir bien estas entradas y salidas!
+- el oop solo nos servirá entonces para documentación?
+
+LlI para mi:
+
+tenemos una lista de terrenos (ciudad):
+-no hay precio, hay pelea de ofertas
+- poseen "tamaño" del terreno? (la utilidad o lo bueno que es el terreno independiente de su posición)
+- la posición del terreno
+- un punto (o puntos) de interés, el centro de la ciudad
+- hay "densidad" de terreno (idealmente), es decir cuantos "hogares" hay en el terreno.
+	Implementar esto puede ser algo dificil, ya que tendria que considerar las posibilidades de que una casa sea reemplazada por n otras :
+
+tenemos una lista de hogares (households):
+- Ingreso
+- punto de trabajo/interés (o puntos)
+- horarios?
+- función de bid-rent/utilidad
+
+hacer tipo Montecarlo?
+lista de hogares asignados y no asignados
+asiganar y desasignar casas segun corresponda hasta llegar a que todas esten ocupadas o a un estado de equilibrio posible, Markov montecarlo?
+
+
+cada house
