@@ -1,2 +1,4 @@
-# transporte-titirilquen
-Implementación de un modelo básico de transporte
+# Transporte Titirilquén
+
+Implementación de un prototipo de simulador del sistema de transporte de una ciudad.
+
