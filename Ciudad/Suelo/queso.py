@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
-
+"""ejemplo de uso de un slider en matplot, lo tengo aqui para referencias, va a ser borrado"""
 
 # The parametrized function to be plotted
 def f(t, amplitude, frequency):

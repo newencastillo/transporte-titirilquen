@@ -1,8 +1,92 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
+def generar_datos(L, N, CBD, estratos=None):
+    """
+    Genera un uso de suelo urbano y retorna un DataFrame con información
+    de cada hogar.
 
-  
+    Parámetros
+    ----------
+    L : Número de parcelas (tamaño de la ciudad).
+    N : Número de hogares por estrato.
+    CBD : Posición del CBD.
+    estratos : list de diccionarios, opcional
+        Definición de los estratos económicos. Cada diccionario debe tener:
+        - 'clase' : int
+        - 'ingresos' :
+        - 'z' : float
+        - 'multiplicador' : 
+
+    Retorna
+    -------
+    pandas.DataFrame
+        Columnas:
+        - hogar_id
+        - ingreso
+        - estrato
+        - parcela
+    """
+
+    if estratos is None:
+        estratos = [
+            {"clase": 1, "ingresos": np.linspace(100, 200, N), "z": 0.2, "multiplicador": 4},
+            {"clase": 2, "ingresos": np.linspace(100, 200, N), "z": 0.4, "multiplicador": 2},
+            {"clase": 3, "ingresos": np.linspace(100, 200, N), "z": 0.6, "multiplicador": 1},
+        ]
+
+    ciudad = Ciudad(L, CBD)
+
+    hogares_info = []  
+
+    hogar_id = 0
+
+    for estrato in estratos: # Construir hogares por cada 
+        clase = estrato["clase"]
+        z = estrato["z"]
+        multiplicador = estrato["multiplicador"]
+
+        def bid_factory(z):
+            def bid(hogar, d, n=1):
+                return (hogar.ingreso * z - hogar.T(d)) / n
+            return bid
+
+        bid_func = bid_factory(z)
+
+        for ingreso_base in estrato["ingresos"]:
+            ingreso = ingreso_base * multiplicador
+            ciudad.añadir_hogar(ingreso, bid_func)
+
+            hogares_info.append({
+                "hogar_id": hogar_id,
+                "ingreso": ingreso,
+                "estrato": clase,
+                "hogar_ref": ciudad.hogares[-1]
+            })
+
+            hogar_id += 1
+
+    # Asignar hogares a parcelas
+    ciudad.asignar_hogares_simple(1)
+
+    # Construir DataFrame final
+    filas = []
+
+    for idx_parcela, parcela in enumerate(ciudad.parcelas):
+        for hogar in parcela:
+            info = next(h for h in hogares_info if h["hogar_ref"] is hogar)
+
+            filas.append({
+                "hogar_id": info["hogar_id"],
+                "ingreso": info["ingreso"],
+                "estrato": info["estrato"],
+                "parcela": idx_parcela
+            })
+
+    df = pd.DataFrame(filas)
+    return df
+
 
 class Ciudad():
     """
@@ -117,31 +201,6 @@ class Ciudad():
                 # "quitar" filas y columnas
                 casas_activas.remove(i)
                 terrenos_activos.remove(j)
-
-
-            # hacer la lista de postores por cada terreno?)
-             
-            # hacerlo y luego vemos, 
-
-
-
-
-            #ok no se como definir el proceso de subasta lol
-            # cada hogar tiene su puje para cada terreno
-            # sería lógico que se participara en todos los terrenos?
-            # la tripleta (casa, terreno, bid)
-            # permite identificar el terreno que más se desea
-            # si ese terreno se ocupa se compite por el siguiente?
-            # 
-
-            # aber, como funciona una subasta
-            #necesito determinar cual es el terreno que desea cada hogar
-            # luego comparamos entre los interesados quien da mas
-            # luego los que quedan fuera siguen con su siguiente más deseado
-            # como carajo se cuales son los más deseados,
-            # era mejor definir la utilidad antes que el bid rent
-            # el bid rent igual considera de cierta forma la utilidad, la distancia etc
-            # donde más quiero estar es donde tenga el mayor bid rent ono
             pass
 
 
@@ -209,7 +268,7 @@ class Ciudad():
         barras = plt.bar(
             range(self.L),
             alturas,
-            color=("red" if self.hogares_asignados() else "blue")
+            color=("blue" if self.hogares_asignados() else "red")
         )
 
         plt.axvline(self.CBD, linestyle="--", label="CBD")
