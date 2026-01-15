@@ -9,8 +9,8 @@ from Ciudad import *   #
 # Parámetros globales del modelo
 # ======================================================
 
-N = 15          # hogares por estrato
-L = 14          # cantidad de terrenos
+N = 10          # hogares por estrato
+L = 15          # cantidad de terrenos
 CBD = L / 2     # posición del CBD
 
 
@@ -18,12 +18,12 @@ CBD = L / 2     # posición del CBD
 # Factory de funciones bid (closure)
 # ======================================================
 
-def make_bid(z):
+def make_bid(z, alpha):
     """
     Devuelve una función de puja con parámetro z fijo.
     """
     def bid(hogar: Hogar, d, n=1):
-        return (hogar.ingreso * z - hogar.T(d)) / n
+        return (hogar.ingreso * z - hogar.T(d)) / (n**alpha)
     return bid
 
 
@@ -37,16 +37,16 @@ def correr_simulacion(z_alta, z_media, z_baja):
     """
     ciudad = Ciudad(L, CBD)
 
-    bid_alta = make_bid(z_alta)
-    bid_media = make_bid(z_media)
-    bid_baja = make_bid(z_baja)
+    bid_alta = make_bid(z_alta, 1.5) # alpha = 1.5 -> prefiero no tener vecinos
+    bid_media = make_bid(z_media, 1) # alpha = 1 -> me es indiferente tener vecinos
+    bid_baja = make_bid(z_baja, 0.9) # alpha = 0.9 -> me gusta tener vecinos
 
     for ingreso in np.linspace(100, 150, N):
         ciudad.añadir_hogar(ingreso * 6, bid_alta)
         ciudad.añadir_hogar(ingreso * 2, bid_media)
         ciudad.añadir_hogar(ingreso, bid_baja)
 
-    ciudad.asignar_hogares_glauber(10000)
+    ciudad.asignar_hogares_compleja(4)
 
     return ciudad
 

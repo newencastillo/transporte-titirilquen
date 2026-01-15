@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from itertools import combinations
 
 def generar_datos(L, N, CBD, estratos=None):
     """
@@ -31,9 +32,9 @@ def generar_datos(L, N, CBD, estratos=None):
 
     if estratos is None:
         estratos = [
-            {"clase": 1, "ingresos": np.linspace(100, 200, N), "z": 0.2, "multiplicador": 4},
-            {"clase": 2, "ingresos": np.linspace(100, 200, N), "z": 0.4, "multiplicador": 2},
-            {"clase": 3, "ingresos": np.linspace(100, 200, N), "z": 0.6, "multiplicador": 1},
+            {"clase": 1, "ingresos": np.linspace(100, 200, int(N/2)), "z": 0.2, "multiplicador": 4},
+            {"clase": 2, "ingresos": np.linspace(100, 200, int(N/4)), "z": 0.4, "multiplicador": 2},
+            {"clase": 3, "ingresos": np.linspace(100, 200, int(N/4)), "z": 0.6, "multiplicador": 1},
         ]
 
     ciudad = Ciudad(L, CBD)
@@ -101,15 +102,12 @@ class Ciudad():
         self.CBD = CBD
         self.hogares: list[Hogar] = []
 
-    def run(self,p=0.8):
-        """
-        DESPRECIADO
-        Rápida ejecución de la dinámica del proceso
-        p: cantidad de hogares con respecto a la cantidad de parcelas"""
-        self.iniciar_hogares(int(self.L*p))
-        for i in range(3):
-            self.asignar_hogares_glauber(1000000)
-            self.dibujar_hogares()
+    def limpiar(self):
+        """ Desaloja todos los terrenos y hogares"""
+        self.parcelas = [[] for i in range(self.L)]
+        for hogar in self.hogares:
+            hogar.asignado = False
+            hogar.parcela = None
         
     def añadir_hogar(self, hogar: Hogar):
         """Añade un hogar a la lsita de hogares de la ciudad sin asignar
@@ -124,6 +122,7 @@ class Ciudad():
 
     def iniciar_hogares(self, N: int):
         """
+        DESPRECIADO ?
         Inicia una cantidad de hogares sin asignarles terrenos.
         Limpia los hogares y las parcelas de la ciudad
         """
@@ -131,6 +130,66 @@ class Ciudad():
         self.parcelas = [[] for i in range(self.L)]
         for i in range(N):
             self.hogares.append(Hogar(1000+i*100))
+    
+
+
+    def asignar_hogares_compleja(self, H_max):
+        """
+        Asigna hogares a terrenos mediante una subasta combinatoria greedy global.
+
+        En cada iteración:
+        - se consideran todas las combinaciones de hogares de tamaño 1..H_max
+          para todos los terrenos disponibles,
+        - se selecciona la combinación (terreno + conjunto de hogares)
+          que maximiza la puja total,
+        - se asignan esos hogares a ese terreno,
+        - se eliminan esos hogares y ese terreno del sistema.
+
+        Parámetros
+        ----------
+        H_max : int
+            Altura máxima permitida por terreno.
+        """
+
+        hogares_activos = set(self.hogares)
+        terrenos_activos = set(range(self.L))
+
+        # limpiar parcelas por si acaso
+        self.limpiar()
+
+        while hogares_activos and terrenos_activos:
+
+            mejor_valor = -np.inf
+            mejor_terreno = None
+            mejor_combo = None
+
+            for terreno in terrenos_activos: # en todo terreno
+                d = abs(self.CBD - terreno)
+                for n in range(1, min(H_max, len(hogares_activos)) + 1): # Por cada posible altura de edificio
+                    for combo in combinations(hogares_activos, n): # Por cada combinaxion posible de altura fija
+
+                        valor = sum(h.bid_rent(d, n) for h in combo)
+
+                        if valor > mejor_valor:
+                            mejor_valor = valor
+                            mejor_terreno = terreno
+                            mejor_combo = combo
+
+            # si no hay ninguna combinación rentable (no es posible creo pero igual)
+            if mejor_combo is None:
+                break
+
+            # asignar hogares al terreno ganador
+            for h in mejor_combo:
+                self.parcelas[mejor_terreno].append(h) # asignamos los hogares al terreno
+                # Innecesario para lo que estamos haciendo pero igual para mentener consistencia 
+                # y para la posibilidad de implementar nash o algo asi
+                h.asignado = True
+                h.parcela = mejor_terreno
+
+            # eliminar hogares y terreno
+            hogares_activos -= set(mejor_combo)
+            terrenos_activos.remove(mejor_terreno)
 
     def hogares_asignados(self) -> bool:
         """True si todos los hogares de la ciudad se declaran asignados
