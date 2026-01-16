@@ -9,10 +9,13 @@ from Ciudad import *   #
 # Parámetros globales del modelo
 # ======================================================
 
-N = 10          # hogares por estrato
-L = 15          # cantidad de terrenos
+N = 25          # hogares por estrato
+L = 50          # cantidad de terrenos
 CBD = L / 2     # posición del CBD
 
+init_z_alta = 0.2
+init_z_media = 0.4
+init_z_baja = 0.6
 
 # ======================================================
 # Factory de funciones bid (closure)
@@ -38,15 +41,15 @@ def correr_simulacion(z_alta, z_media, z_baja):
     ciudad = Ciudad(L, CBD)
 
     bid_alta = make_bid(z_alta, 1.5) # alpha = 1.5 -> prefiero no tener vecinos
-    bid_media = make_bid(z_media, 1) # alpha = 1 -> me es indiferente tener vecinos
-    bid_baja = make_bid(z_baja, 0.9) # alpha = 0.9 -> me gusta tener vecinos
+    bid_media = make_bid(z_media, 1) # alpha = 1 -> me es indiferente tener vecinos (considerando mi porcion del terreno)
+    bid_baja = make_bid(z_baja, 0) # alpha = 0 -> me es completamente indifernete tener vecinos (considerando edificio)
 
     for ingreso in np.linspace(100, 150, N):
         ciudad.añadir_hogar(ingreso * 6, bid_alta)
         ciudad.añadir_hogar(ingreso * 2, bid_media)
         ciudad.añadir_hogar(ingreso, bid_baja)
 
-    ciudad.asignar_hogares_compleja(4)
+    ciudad.asignar_hogares_compleja(3)
 
     return ciudad
 
@@ -106,9 +109,7 @@ def dibujar_ciudad(ciudad: Ciudad, ax):
 # ======================================================
 
 # Valores iniciales
-init_z_alta = 0.2
-init_z_media = 0.4
-init_z_baja = 0.6
+
 
 fig, ax = plt.subplots()
 fig.subplots_adjust(left=0.25, bottom=0.35)
