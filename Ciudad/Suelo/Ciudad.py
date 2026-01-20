@@ -2,11 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from itertools import combinations
+import random
+from ..Demanda.Demanda import *
 
-def generar_datos(L, N, CBD, estratos=None):
+def generar_datos(L, N, CBD, estratos=None) -> Ciudad:
     """
-    Genera un uso de suelo urbano y retorna un DataFrame con información
-    de cada hogar.
+    Genera un uso de suelo urbano y retorna una ciudad con hogares asignados
 
     Parámetros
     ----------
@@ -22,12 +23,7 @@ def generar_datos(L, N, CBD, estratos=None):
 
     Retorna
     -------
-    pandas.DataFrame
-        Columnas:
-        - hogar_id
-        - ingreso
-        - estrato
-        - parcela
+    instacnia de Ciudad
     """
 
     if estratos is None:
@@ -72,21 +68,7 @@ def generar_datos(L, N, CBD, estratos=None):
     ciudad.asignar_hogares_simple(1)
 
     # Construir DataFrame final
-    filas = []
-
-    for idx_parcela, parcela in enumerate(ciudad.parcelas):
-        for hogar in parcela:
-            info = next(h for h in hogares_info if h["hogar_ref"] is hogar)
-
-            filas.append({
-                "hogar_id": info["hogar_id"],
-                "ingreso": info["ingreso"],
-                "estrato": info["estrato"],
-                "parcela": idx_parcela
-            })
-
-    df = pd.DataFrame(filas)
-    return df
+    return ciudad
 
 
 class Ciudad():
@@ -96,11 +78,14 @@ class Ciudad():
     Un distrito de negocios central (CBD)
     Una lista de parcelas, cada una puede contener una cantidad de casas
     """
-    def __init__(self, L=100, CBD = 50):
+    def __init__(self, L=100, CBD = 50, prohibidos = []):
         self.L = L; """Cantidad de Parcelas"""
         self.parcelas: list[list[Hogar]] = [[] for i in range(L)] # una lista de listas, cada lsita interior representa las casas en el terreno
-        self.CBD = CBD
+        self.cbd_index = CBD
         self.hogares: list[Hogar] = []
+
+        self.prohibidos = [CBD]
+        self.prohibidos.append(prohibidos)
 
     def limpiar(self):
         """ Desaloja todos los terrenos y hogares"""
@@ -114,10 +99,10 @@ class Ciudad():
         dado un hogar iniciado"""
         self.hogares.append(hogar)
     
-    def añadir_hogar(self, ingreso: int, bid_fun):
+    def añadir_hogar(self, ingreso: int, bid_fun, estrato: int):
         """Añade un hogar a la lsita de hogares de la ciudad sin asignar
         Crea un hogar con el ingreso y función de puje dada"""
-        hogar = Hogar(ingreso, bid_fun)
+        hogar = Hogar(ingreso,estrato, bid_fun)
         self.hogares.append(hogar)
 
     def iniciar_hogares(self, N: int):
@@ -132,6 +117,51 @@ class Ciudad():
             self.hogares.append(Hogar(1000+i*100))
     
 
+    def generar_poblacion_completa(self, config):
+        """ entrega el estado actual de la población y la ciudad como un diccionario para ser usado en el módulo demanda"""
+        poblacion = []
+        id_counter = 1
+
+        print(f"Generando población completa para {self.L} celdas...")
+
+        for hogar in self.hogares:
+            if not hogar.asignado: continue
+
+            estrato = hogar.estrato
+
+            #Teletrabajo
+            prob_tele = config["estratos"][estrato]["prob_teletrabajo"]
+            teletrabaja = random.random() < prob_tele
+
+            #Flexible
+            prob_flex = config["estratos"][estrato]["prob_jornada_flexible"]
+            es_flexible = random.random() < prob_flex
+
+            #Calcular Entrada 
+            minuto_entrada = asignar_horario_entrada_discreto(estrato, config, intervalo=15)
+            # -----------------------
+
+            #Calcular Duración y Salida
+            duracion_min, tipo_jornada = calcular_duracion_jornada(estrato, es_flexible, config)
+            minuto_salida = minuto_entrada + duracion_min
+
+            usuario = {
+                "id_unico": id_counter,
+                "celda_origen": hogar.parcela,
+                "estrato": estrato,
+                "teletrabaja": teletrabaja,
+                "es_flexible": es_flexible,
+                "tipo_jornada": tipo_jornada,
+                "hora_entrada": formato_hora(minuto_entrada),
+                "hora_salida": formato_hora(minuto_salida),
+                "duracion_horas": duracion_min / 60,
+                "min_entrada": minuto_entrada,
+                "min_salida": minuto_salida
+            }
+            poblacion.append(usuario)
+            id_counter += 1
+
+        return poblacion
 
     def asignar_hogares_compleja(self, H_max):
         """
@@ -159,11 +189,13 @@ class Ciudad():
 
         while hogares_activos and terrenos_activos:
 
+            print(f"Quedan {len(terrenos_activos)} terrenos por asignar")
             mejor_valor = -np.inf
             mejor_terreno = None
             mejor_combo = None
 
             for terreno in terrenos_activos: # en todo terreno
+                print(f"Calculando postores para parcela {terreno}")
                 d = abs(self.CBD - terreno)
                 for n in range(1, min(H_max, len(hogares_activos)) + 1): # Por cada posible altura de edificio
                     for combo in combinations(hogares_activos, n): # Por cada combinaxion posible de altura fija
@@ -199,13 +231,13 @@ class Ciudad():
                 return False
         return True
     
-    def hogares_no_asignados(self) -> int:
-        """Cantidad de hogares sin terreno asignado en la ciudad"""
-        i = 0
+    def hogares_no_asignados(self) -> list[Hogar]:
+        """Hogares sin terreno asignado en la ciudad"""
+        noasign =[]
         for hogar in self.hogares:
             if not hogar.asignado:
-                i+=1
-        return i
+                noasign.append(hogar)
+        return noasign
     
     def asignar_hogares_simple(self, D):
         """Implementación simple de la asignación de terrenos
@@ -262,7 +294,6 @@ class Ciudad():
                 terrenos_activos.remove(j)
             pass
 
-
     def asignar_hogares_glauber(self, T):
          """Dinámica de glauber
          T: # de iteraciones"""
@@ -306,6 +337,139 @@ class Ciudad():
             """if self.hogares_asignados():
                 return"""
 
+    def asignar_hogares_subasta(
+        self,
+        eps=1.0,
+        max_iter=100_000
+    ):
+        """
+        Subasta ascendente tipo Auction Algorithm (capacidad 1 por terreno)
+        """
+
+        hogares = self.hogares
+        terrenos = list(range(self.L))
+
+        precios = np.zeros(self.L)
+
+        # Asignaciones
+        asignacion_hogar = {h: None for h in hogares}
+        asignacion_terreno = {t: None for t in terrenos}
+
+        it = 0
+
+        while it < max_iter:
+
+            # hogares sin asignar
+            libres = [h for h in hogares if asignacion_hogar[h] is None]
+
+            if not libres:
+                print(f"Convergió en {it} iteraciones")
+                break
+
+            for h in libres:
+
+                # calcular utilidad en cada terreno
+                valores = []
+                for t in terrenos:
+                    if t == self.prohibidos:
+                        valores.append(-np.inf)
+                        continue
+
+                    d = abs(t - self.cbd_index)
+                    valores.append(h.bid_rent(d) - precios[t])
+
+                valores = np.array(valores)
+
+                # mejor y segundo mejor terreno
+                t_star = np.argmax(valores)
+                mejor = valores[t_star]
+
+                if mejor <= 0:
+                    continue  # el hogar sale de la subasta
+
+                # segundo mejor (para regla de precios)
+                valores[t_star] = -np.inf
+                segundo = np.max(valores)
+
+                # incremento tipo Vickrey
+                delta = mejor - segundo + eps
+                precios[t_star] += delta
+
+                # reasignación
+                perdedor = asignacion_terreno[t_star]
+                asignacion_terreno[t_star] = h
+                asignacion_hogar[h] = t_star
+
+                if perdedor is not None:
+                    asignacion_hogar[perdedor] = None
+
+            it += 1
+
+        # Construir estructura final
+        self.parcelas = [[] for _ in range(self.L)]
+
+        for h, t in asignacion_hogar.items():
+            if t is not None:
+                h.asignado = True
+                h.parcela = t
+                self.parcelas[t].append(h)
+
+
+
+    def asignar_hogares_estrato(self, h_max):
+        """Se asignan los hogares a las parcelas maximizando el puje en conjunto de cada estrato
+        """
+        # Limpiar por si las moscas
+        self.limpiar()
+        
+        #queremos recorrer los terrenos desde los más cercanos al cbd
+        terrenos_ordenados = sorted(
+            range(self.L),
+            key=lambda t: abs(t - self.cbd_index)
+        )
+
+        # Hogares no asignados = [[I alto],[I medio], [I bajo]]
+        no_asignados = {1: [], 2: [], 3: []}
+        for h in self.hogares:
+            no_asignados[h.estrato].append(h)
+
+
+
+        #itermos terrenos en orden
+        for t in terrenos_ordenados:
+            d = t - self.cbd_index
+            
+            mejor_puje = -np.inf
+            mejor_estrato = None
+            mejor_altura = 0
+
+            for estrato in [1,2,3]:
+                disponibles = len(no_asignados[estrato])
+                if disponibles == 0:
+                    continue
+
+                # chequeamos la mejor altura
+                for altura in range(1, min(h_max, disponibles) +1): # range no incluye el ultimo
+                    puje = no_asignados[estrato][0].bid_rent(d, altura) * altura
+                    # deberia ser el mismo bid para cada estrato por lo que con tomar el primero bastaria
+                    if puje > mejor_puje: # guardamos maximo local
+                        mejor_puje = puje
+                        mejor_altura = altura
+                        mejor_estrato = estrato
+
+            
+            if mejor_estrato == None:
+                continue # si nadie quiere esta parcela
+
+            # de otro modo asignamos por estrato casas cualquiere   
+            for _ in range(mejor_altura):
+                h = no_asignados[mejor_estrato].pop(0)
+                h.asignado = True
+                h.parcela = t
+                self.parcelas[t].append(h)
+
+        
+    
 
     def dibujar_hogares(self):
         """Plotea el estado actual de la ciudad y sus parcelas como un barplot
@@ -366,11 +530,16 @@ class Hogar():
     Representa un "Household" de la teoría 
     Posee un ingreso, un punto de interés,
     una función de Bid-rent
+
+    Para llamar la función bid se usa bid_rent()
+
+    Para asignar un nuevo bid se debe reasignar la variable self.bid: function
     
     """
-    def __init__(self, ingreso, bid_fun = lambda I, d, z, n: I*(1 - z)/((n**(1.2))*d**(1/2)+ 0.01), T = lambda d:d):
+    def __init__(self, ingreso, estrato: int, bid_fun = lambda I, d, z, n: I*(1 - z)/((n**(1.2))*d**(1/2)+ 0.01), T = lambda d:d):
             self.ingreso = ingreso
             self.bid = bid_fun
+            self.estrato = estrato
             """Función de Puje del hogar, debe ser una función de 4 parámetros numéricos
             ingreso, distancia, z = porcentaje de ingreso que aspiro a conservar,
             n = número de hogares por parcela"""
