@@ -3,9 +3,33 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from itertools import combinations
 import random
-from ..Demanda.Demanda import *
 
-def generar_datos(L, N, CBD, estratos=None) -> Ciudad:
+"""
+# USO:
+# reemplazar :
+# mi_ciudad = CiudadLineal(n_celdas=1000, ancho_celda=0.01) 
+# poblacion = generar_poblacion_completa(mi_ciudad, CONFIG_DEMANDA) con:
+
+from Ciudad import *
+
+mi_ciudad = generar_ciudad(L= 1000, N= 500, CBD = 500, ancho_celda=0.01) # Modificar parámetros al gusto
+# Cuidado que N es hogares por estrato (hay 3N hogares)
+
+# Generar lista de diccionarios (lista de hogares/usuarios)
+poblacion = mi_ciudad.generar_poblacion_completa(CONFIG_DEMANDA) # (en teoría el mismo config, tiene que estar en algun lado)
+# Pueden quedar hogares sin asignar, no se ven reflejados en "población"
+
+# usar poblacion como se usaría normalmente
+
+# Nota: 
+# esto es para ver si pueden interactuar los modelos.
+# la asignación que se hace es bien mala y es de un hogar por parcela
+# Se puede cambiar y añadir  generar_poblacion_completa(CONFIG_DEMANDA, hogares_por_terreno=2) o el numero deseado
+# esto va a crear clones (con distinto id) en cada parcela, por si se quiere jugar con la "densidad" (pero sigue siendo uniforme la cantidad de hogares por parcela)
+# 
+"""
+
+def generar_ciudad(L, N, CBD, estratos=None, ancho_celda=0.01) -> Ciudad:
     """
     Genera un uso de suelo urbano y retorna una ciudad con hogares asignados
 
@@ -23,27 +47,25 @@ def generar_datos(L, N, CBD, estratos=None) -> Ciudad:
 
     Retorna
     -------
-    instacnia de Ciudad
+    instancia de Ciudad con hogares asignados.
     """
 
-    if estratos is None:
+    if estratos is None:  # Definición de los estratos, modificar ingresos o distribución aki
         estratos = [
-            {"clase": 1, "ingresos": np.linspace(100, 200, int(N/2)), "z": 0.2, "multiplicador": 4},
-            {"clase": 2, "ingresos": np.linspace(100, 200, int(N/4)), "z": 0.4, "multiplicador": 2},
-            {"clase": 3, "ingresos": np.linspace(100, 200, int(N/4)), "z": 0.6, "multiplicador": 1},
+            {"clase": 1, "ingresos": np.linspace(1, 1.2, N)*3000000, "z": 0.2, "multiplicador": 1},
+            {"clase": 2, "ingresos": np.linspace(1, 1.2, N)*1000000, "z": 0.4, "multiplicador": 1},
+            {"clase": 3, "ingresos": np.linspace(1, 1.2, N)*500000, "z": 0.6, "multiplicador": 1},
         ]
 
-    ciudad = Ciudad(L, CBD)
+    ciudad = Ciudad(L, CBD, ancho_celda= ancho_celda)
 
-    hogares_info = []  
-
-    hogar_id = 0
-
+    # Construir Hogares (3N hogares)
     for estrato in estratos: # Construir hogares por cada 
         clase = estrato["clase"]
         z = estrato["z"]
         multiplicador = estrato["multiplicador"]
 
+        # Lo siguiente podría ser una línea: pero fabrica el puje para este estrato
         def bid_factory(z):
             def bid(hogar, d, n=1):
                 return (hogar.ingreso * z - hogar.T(d)) / n
@@ -51,23 +73,13 @@ def generar_datos(L, N, CBD, estratos=None) -> Ciudad:
 
         bid_func = bid_factory(z)
 
-        for ingreso_base in estrato["ingresos"]:
+        for ingreso_base in estrato["ingresos"]: # se añaden N hogares de este estrato
             ingreso = ingreso_base * multiplicador
-            ciudad.añadir_hogar(ingreso, bid_func)
-
-            hogares_info.append({
-                "hogar_id": hogar_id,
-                "ingreso": ingreso,
-                "estrato": clase,
-                "hogar_ref": ciudad.hogares[-1]
-            })
-
-            hogar_id += 1
+            ciudad.añadir_hogar(ingreso, bid_func, clase)
 
     # Asignar hogares a parcelas
     ciudad.asignar_hogares_simple(1)
-
-    # Construir DataFrame final
+    # Retorna el objeto ciudad
     return ciudad
 
 
@@ -78,12 +90,19 @@ class Ciudad():
     Un distrito de negocios central (CBD)
     Una lista de parcelas, cada una puede contener una cantidad de casas
     """
-    def __init__(self, L=100, CBD = 50, prohibidos = []):
+    def __init__(self, L=100, CBD = 50, prohibidos = [], ancho_celda=0.01):
         self.L = L; """Cantidad de Parcelas"""
         self.parcelas: list[list[Hogar]] = [[] for i in range(L)] # una lista de listas, cada lsita interior representa las casas en el terreno
-        self.cbd_index = CBD
+        self.cbd_index = int(CBD)
         self.hogares: list[Hogar] = []
 
+        # Atributos necesarios para interacción con demanda
+        self.n_celdas = L
+        self.ancho_celda = ancho_celda
+        self.largo_total = L * ancho_celda
+
+
+        # esto esta masomenos, no se usa queque
         self.prohibidos = [CBD]
         self.prohibidos.append(prohibidos)
 
@@ -117,7 +136,7 @@ class Ciudad():
             self.hogares.append(Hogar(1000+i*100))
     
 
-    def generar_poblacion_completa(self, config):
+    def generar_poblacion_completa(self, config, hogares_por_terreno=1):
         """ entrega el estado actual de la población y la ciudad como un diccionario para ser usado en el módulo demanda"""
         poblacion = []
         id_counter = 1
@@ -125,7 +144,7 @@ class Ciudad():
         print(f"Generando población completa para {self.L} celdas...")
 
         for hogar in self.hogares:
-            if not hogar.asignado: continue
+            if not hogar.asignado: continue #ignorar hogares no asignados en caso de existir
 
             estrato = hogar.estrato
 
@@ -144,24 +163,26 @@ class Ciudad():
             #Calcular Duración y Salida
             duracion_min, tipo_jornada = calcular_duracion_jornada(estrato, es_flexible, config)
             minuto_salida = minuto_entrada + duracion_min
+            
+            # clonamos 
+            for _ in range(hogares_por_terreno):
+                usuario = {
+                    "id_unico": id_counter,
+                    "celda_origen": hogar.parcela,
+                    "estrato": estrato,
+                    "teletrabaja": teletrabaja,
+                    "es_flexible": es_flexible,
+                    "tipo_jornada": tipo_jornada,
+                    "hora_entrada": formato_hora(minuto_entrada),
+                    "hora_salida": formato_hora(minuto_salida),
+                    "duracion_horas": duracion_min / 60,
+                    "min_entrada": minuto_entrada,
+                    "min_salida": minuto_salida
+                }
+                poblacion.append(usuario)
+                id_counter += 1
 
-            usuario = {
-                "id_unico": id_counter,
-                "celda_origen": hogar.parcela,
-                "estrato": estrato,
-                "teletrabaja": teletrabaja,
-                "es_flexible": es_flexible,
-                "tipo_jornada": tipo_jornada,
-                "hora_entrada": formato_hora(minuto_entrada),
-                "hora_salida": formato_hora(minuto_salida),
-                "duracion_horas": duracion_min / 60,
-                "min_entrada": minuto_entrada,
-                "min_salida": minuto_salida
-            }
-            poblacion.append(usuario)
-            id_counter += 1
-
-        return poblacion
+        return poblacion # Población como lista de diccionarios
 
     def asignar_hogares_compleja(self, H_max):
         """
@@ -244,28 +265,33 @@ class Ciudad():
         EN CONSTRUCCION: ES NECESARIO IMPLEMENTAR LA FUNCIÓN DE BID ADECUADAMENTI PARA CADA ESTRATO SOCIAL
         Cada día se asigna el terreno a su mejor postor.
         D: Cantidad de días que se van a subastar lso terrenos (cantidad de iteraciones)"""
-        #assert (len(self.hogares)<=self.L), "No pueden haber más casas que terrenos en este modelo"
-        
+        # Limpiamos la ciudad por si las mosques
+        self.limpiar()
         # calcular tamaño de la matriz inicial
         # Numero de hogares
         n = len(self.hogares)
         # Numero de parcelas
         m = self.L
 
-        # Día de parcelas:
+        # Día de parcelas (inutil):
         for dia in range(D):
             
             subasta = np.zeros((n,m))
-            # calcular matriz Bid terrenos/hogares 
+            # calcular matriz Bid terrenosxhogares
+            # Llenamos la matriz subasta:
             for h in range(n): #hogares
                 for p in range(m): # Terrenos/parcelas
-                    d = abs(self.CBD - p)
+                    d = abs(self.cbd_index - p)
                     subasta[h,p] = self.hogares[h].bid_rent(d); """OJO AKI, e""" #ctmre
 
             
-            # Aignar parcelas a terrenos hasta que se acaben las casas o terrenos
+            # Asignar parcelas a terrenos hasta que se acaben las casas o terrenos
             casas_activas = list(range(n))
             terrenos_activos = list(range(m))
+            
+            # quitamos el cbd del proceso de asignación
+            if self.cbd_index in terrenos_activos:
+                terrenos_activos.remove(self.cbd_index)
 
             while casas_activas and terrenos_activos:
                 # la complejidad de la siguiente parte es para no perder los indices al eliminar filas y cols
@@ -281,13 +307,13 @@ class Ciudad():
                 j = terrenos_activos[j_loc]
                 
                 # Asignación
-                # desasignar hogares de la parcela
-                for hogar in self.parcelas[j]: 
-                    hogar.asignado = False
+                # desasignar hogares de la parcela y hogares
+                
 
                 # asignar hogar al terreno que corresponde
                 self.parcelas[j] = [self.hogares[i]]
                 self.hogares[i].asignado = True
+                self.hogares[i].parcela = j
                 
                 # "quitar" filas y columnas
                 casas_activas.remove(i)
@@ -414,8 +440,6 @@ class Ciudad():
                 h.parcela = t
                 self.parcelas[t].append(h)
 
-
-
     def asignar_hogares_estrato(self, h_max):
         """Se asignan los hogares a las parcelas maximizando el puje en conjunto de cada estrato
         """
@@ -467,9 +491,7 @@ class Ciudad():
                 h.asignado = True
                 h.parcela = t
                 self.parcelas[t].append(h)
-
-        
-    
+   
 
     def dibujar_hogares(self):
         """Plotea el estado actual de la ciudad y sus parcelas como un barplot
@@ -494,7 +516,7 @@ class Ciudad():
             color=("blue" if self.hogares_asignados() else "red")
         )
 
-        plt.axvline(self.CBD, linestyle="--", label="CBD")
+        plt.axvline(self.cbd_index, linestyle="--", label="CBD")
 
         # Anotar ingreso promedio por columna
         for i, barra in enumerate(barras):
@@ -519,10 +541,7 @@ class Ciudad():
         plt.show()
 
 
-                   
-                   
-
-        
+                          
 
 
 class Hogar():
@@ -561,4 +580,107 @@ class Hogar():
     
     def __repr__(self):
         return f"Hogar(${self.ingreso}, {self.parcela})"
-    
+
+
+
+# =================================
+# Funciones Auxiliares de los pibes
+# =================================
+
+
+def formato_hora(minutos): #minutos a horas
+    h = int(minutos // 60) % 24
+    m = int(minutos % 60)
+    return f"{h:02d}:{m:02d}"
+
+def redondear_horario(minutos_reales, intervalo): #redondeo a intervalo
+    if intervalo <= 0: return int(minutos_reales)
+    bloques = round(minutos_reales / intervalo)
+    return int(bloques * intervalo)
+
+def calcular_duracion_jornada(estrato, es_flexible, config):
+    params = config["estratos"][estrato]
+    params_j = params["jornada"]
+
+    es_part_time = random.random() < params["prob_part_time"]
+
+    if es_part_time:
+        return int(params_j["horas_part_time"] * 60), "Part-Time"
+    elif es_flexible:
+        return int(params_j["horas_flexible"] * 60), "Flexible"
+    else:
+        return int(params_j["horas_rigido"] * 60), "Rígido"
+
+
+def asignar_horario_entrada_discreto(estrato, config, intervalo=15):
+    """Calcula la hora de entrada basada en probabilidad y estrato"""
+    prob_flex = config["estratos"][estrato]["prob_jornada_flexible"]
+
+    #Media y Desviación por estrato(Sigma)
+    perfiles = {
+        1: {'media': 540, 'sigma_rigido': 20, 'sigma_flex': 60}, # 9:00 AM
+        2: {'media': 510, 'sigma_rigido': 15, 'sigma_flex': 40}, # 8:30 AM
+        3: {'media': 480, 'sigma_rigido': 10, 'sigma_flex': 20}  # 8:00 AM
+    }
+
+    es_flexible = random.random() < prob_flex
+    p = perfiles[estrato]
+    sigma = p['sigma_flex'] if es_flexible else p['sigma_rigido']
+
+    minuto_continuo = np.random.normal(loc=p['media'], scale=sigma)
+    return redondear_horario(minuto_continuo, intervalo)
+
+CONFIG_DEMANDA = {
+    "globales": {
+        "v_auto": 31, "v_metro": 35, "v_bici": 14, "v_caminata": 4.8,
+        "costo_combustible_km" : 120, "costo_tarifa_metro": 800, "costo_parking": 6000 #CLP
+    },
+    "estratos": {
+        1: { # ESTRATO ALTO
+            "prob_teletrabajo": 0.40, "prob_jornada_flexible": 0.50, "prob_part_time": 0.05,
+            "jornada": {"horas_rigido": 9.0, "horas_flexible": 8.0, "horas_part_time": 4.0},
+            "betas": {
+                "asc_auto": 1.5, "asc_metro": -0.2, "asc_bici": -0.9, "asc_caminata": -0.5,
+                "b_tiempo_viaje": -0.055,
+                "b_tiempo_espera": -0.05,
+                "b_tiempo_caminata": -0.15,
+                "b_costo": -0.00008,
+                "penalizaciones_fisicas": {
+                    "bici_10": -0.09, "bici_20": -0.15, "bici_30": -0.5,
+                    "walk_5": -0.09,  "walk_15": -0.18, "walk_25": -0.4
+                }
+            }
+        },
+        2: { # ESTRATO MEDIO
+            "prob_teletrabajo": 0.20, "prob_jornada_flexible": 0.30, "prob_part_time": 0.10,
+            "jornada": {"horas_rigido": 9.0, "horas_flexible": 8.5, "horas_part_time": 4.5},
+            "betas": {
+                "asc_auto": 0.7889, "asc_metro": 0.1040, "asc_bici": -0.6818, "asc_caminata": 0.1,
+                "b_tiempo_viaje": -0.0331,
+                "b_tiempo_espera": -0.0243,
+                "b_tiempo_caminata": -0.0440,
+                "b_costo": -0.0002,
+                "penalizaciones_fisicas": {
+                    "bici_10": -0.0634, "bici_20": -0.1, "bici_30": -0.4,
+                    "walk_5": -0.05,  "walk_15": -0.09, "walk_25": -0.2
+                }
+            }
+        },
+        3: { # ESTRATO BAJO
+            "prob_teletrabajo": 0.05, "prob_jornada_flexible": 0.10, "prob_part_time": 0.15,
+            "jornada": {"horas_rigido": 9.5, "horas_flexible": 9.0, "horas_part_time": 5.0},
+            "betas": {
+                "asc_auto": 0.2, "asc_metro": 0.25, "asc_bici": -0.4, "asc_caminata": 0.4,
+                "b_tiempo_viaje": -0.0150,
+                "b_tiempo_espera": -0.0150,
+                "b_tiempo_caminata": -0.0250,
+                "b_costo": -0.0006,
+                "penalizaciones_fisicas": {
+                    "bici_10": -0.0300, "bici_20": -0.0500, "bici_30": -0.7,
+                    "walk_5": -0.0250,  "walk_15": -0.0400, "walk_25": -0.08
+                }
+            }
+        }
+    }
+}
+
