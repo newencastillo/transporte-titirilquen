@@ -10,14 +10,14 @@ from scipy.special import logsumexp
 
 ### crear Datos exógenos
 
-#np.random.seed()
+np.random.seed(22)
 
-I = 101   # número de parcelas
+I = 1001   # número de parcelas
 CBD = I//2
 H = 3    # estratos
 
 H_h = np.array([33300, 33300, 33300]) # Cantidad de hogares por estrato
-y = np.array([10000.0, 20.0, 4.0]) # Ingresos por estrato
+y = np.array([10.0, 7.0, 4.0]) # Ingresos por estrato
 total_households = H_h.sum()
 
 beta = 1.0 
@@ -61,107 +61,150 @@ def generar_oferta_normal(I, N, CBD, stdv=None) -> list[int]:
     return S
 S = generar_oferta_normal(I, total_households, CBD)
 
-T = [abs(i - CBD) for i in range(I)] # factor distancia T:I (parcela) -> R (Valor)
+print("Distribucion de parcelas", S)
+print("cantidad de casas", sum(S))
+
+
+T = np.array([abs(i - CBD)/I for i in range(I)]) # factor distancia T:I (parcela) -> R (Valor)
 # TODO cambiar por  por logsuma de seba logyt
 
 
 
-## FUNCIÓN DE VALORACIÓN DE LA PARCELA
-ell = np.array([0.5, 1.0, 2.0])  # ricos pujan más fuerte
+def resolver_equilibrio_54(
+    y,          # (H,) ingresos
+    H_h,        # (H,) masas por estrato
+    S,          # (I,) capacidades parcelas
+    T,          # (I,) distancia / atributo espacial
+    beta,       # escalar
+    lambda_h,   # (H,) pendientes de puja
+    alpha,      # (H,) peso transporte
+    rho,        # (H,) peso densidad
+    tol=1e-8,
+    max_iter=10000
+):
+    """
+    Resuelve utilidades normalizadas \bar u según ecuación (5.4)
+    """
 
-def f(h, i):
-    # pesos por estrato?
-    alpha = [0.5, 0.5, 0.5]      # penaliza distancia
-    rho = [0.5, 0.5, 0.5]      # penaliza densidad 
-    
-    return - alpha[h] * T[i] - rho[h] * S[i]
+    H = len(y)
+    I = len(S)
+
+    y = np.asarray(y)
+    H_h = np.asarray(H_h)
+    S = np.asarray(S)
+    lambda_h = np.asarray(lambda_h)
+    alpha = np.asarray(alpha)
+    rho = np.asarray(rho)
+    #S_norm = S/S.mean() # normalizamos S para que no se rompa el cálculo cuando cambia el I
+    # -------------------------
+    # f_h(z_i) / lambda_h
+    # -------------------------
+    # f_h(z_i) / lambda_h
+    f_div_lambda = (
+        - alpha[:, None] * T[None, :]
+        - rho[:, None] * S[None, :]
+    ) / lambda_h[:, None]
+
+    # log z_hi = log H_h + beta (y_h + f_h(z_i)/lambda_h)
+    log_z = (
+        np.log(H_h)[:, None]
+        + beta * (y[:, None] + f_div_lambda)
+    )
 
 
-# calcular coso importante  
-# logZ[h,i] = log(H_h[h]) + beta * (y[h] + f(h,i))
-logZ = np.zeros((H, I))
+    # -------------------------
+    # operador de punto fijo F(\bar u)
+    # -------------------------
+    def F(u_bar):
+        """
+        Operador de punto fijo según ecuación (5.4)
+        usando logsumexp (numéricamente estable)
+        """
 
-for h in range(H):
+        # log denom_i = log sum_g H_g exp(beta(y_g + f_gi/lambda_g - u_g))
+        log_denom = logsumexp(
+            log_z - beta * u_bar[:, None],
+            axis=0
+        )  # shape (I,)
+
+        # log numerador_h = log sum_i S_i * exp(beta(y_h + f_hi/lambda_h) - log denom_i)
+        log_num = (
+            np.log(S)[None, :]
+            + beta * (y[:, None] + f_div_lambda)
+            - log_denom[None, :]
+        )
+
+        u_new = (1 / beta) * logsumexp(log_num, axis=1)
+
+        # normalización (invarianza por traslación)
+        u_new -= u_new[0]
+
+        return u_new
+
+    # -------------------------
+    # iteración
+    # -------------------------
+    u_bar = np.zeros(H)
+
+    for it in range(max_iter):
+        u_new = F(u_bar)
+        if np.linalg.norm(u_new - u_bar) < tol:
+            print(f"Convergió en {it} iteraciones")
+            break
+        u_bar = u_new
+
+
+    # -------------------------
+    # precios de equilibrio
+    # -------------------------
+   
+
+    log_p = logsumexp(
+    np.log(H_h)[:, None]
+    + beta * (y[:, None] + f_div_lambda - u_bar[:, None]),
+    axis=0
+    )
+
+    p = log_p / beta
+
+
+    # -------------------------
+    # probabilidades Q_hi
+    # -------------------------
+    Q = np.zeros((H, I))
+
     for i in range(I):
-        logZ[h,i] = np.log(H_h[h]) + (beta) * (y[h] + f(h,i)/ ell[h])
+        log_q = (
+            np.log(S[i])
+            + beta * (y + f_div_lambda[:, i] - u_bar - p[i])
+        )
+
+        Q[:, i] = np.exp(log_q - logsumexp(log_q))
 
 
-# Operador de punto fijo:
-def F(u):
-    """
-    Operador de punto fijo en utilidades (log-sum-exp estable)
-    """
-    # log_terms[g,i] = logZ[g,i] - beta * u[g]
-    log_terms = logZ - beta * u[:, None]   # (H, I)
-
-    # log denom_i = log sum_g exp(log_terms[g,i])
-    log_denom = logsumexp(log_terms, axis=0)   # (I,)
-
-    # log numerador_h = log sum_i exp( log S_i + logZ[h,i] - log_denom[i] )
-    log_S = np.log(S, where=(S > 0), out=np.full(I, -np.inf))
-
-    log_num = logsumexp(
-        log_S + logZ - log_denom,
-        axis=1
-    )
-
-    u_new = (1 / beta) * log_num
-
-    # normalización (invarianza aditiva)
-    u_new -= u_new[0]
-
-    return u_new
+    return u_bar, p, Q
 
 
+u, p, Q = resolver_equilibrio_54(
+    T=T,
+    S=S,
+    H_h=H_h,
+    y=y,
+    beta=beta,
+    alpha=[1.0, 1.0, 1.0],
+    rho=[0.5, 0.5, 0.5],
+    lambda_h=[0.6,0.5,0.4] # marginal utility of income, que tanta utilidad me genera la plata
+)
+# normalizar precios
+p -= p.min()+1 # normalizar precios,
 
-## Iterar para encontrar punto fijo
-
-u = np.zeros(H)
-tol = 1e-6
-max_iter = 10000
-
-for it in range(max_iter):
-    u_new = F(u)
-
-    if np.linalg.norm(u_new - u) < tol:
-        print(f"Convergió en {it} iteraciones")
-        break
-
-    u = u_new
-
-print("Utilidades de equilibrio:", u)
-
-
-
-p = np.zeros(I)
-
-for i in range(I):
-    log_terms = np.array([
-        np.log(H_h[h]) + beta * (y[h] - u[h] + f(h, i))
-        for h in range(H)
-    ])
-
-    p[i] = (1 / beta) * logsumexp(log_terms)
-
-print("Precios:" , p)
-
-Q = np.zeros((H, I))
-
-log_S = np.log(S, where=(S > 0), out=np.full(I, -np.inf))
-
-for h in range(H):
-    log_num = (
-        log_S
-        + beta * (y[h] - u[h] + np.array([f(h, i) for i in range(I)]) - p)
-    )
-
-    log_denom = logsumexp(log_num)
-
-    Q[h, :] = np.exp(log_num - log_denom)
-
+R = p*S # Renta total del terreno
 print("Asignación total por estrato:", Q.sum(axis=1))
 print("Capacidad por parcela:", (H_h[:,None]*Q).sum(axis=0)[:])
 
+print("Niveles de utilidad en equilibrio", u)
+print("PRecios por hogar: ", p)
+print("Precios totales", R)
 
 def asignar_hogares_simple(Q, H, S): # TODO implementar
     """Asigna hogares de una mediante una pruta adaptación de las probabilidades desubasta Q
@@ -175,8 +218,7 @@ def asignar_hogares_simple(Q, H, S): # TODO implementar
 
     Nota
     ----
-    De momento no se considera la cantidad de hogares que hay xd,
-    se hará la asignación en base a la probabilidad de subasta
+    Se hará la asignación en base a la probabilidad de subasta
     que razonablemente considerará la cantidad de 
     """
     print("Asignando hogares simple")
@@ -196,8 +238,6 @@ def asignar_hogares_simple(Q, H, S): # TODO implementar
     
     # contador hogares sin asignar
     # Recorremos las parcelas en orden
-    # que hago por que me cuesta tanto tomar decisiones de diseñooo
-
     
     S = np.asarray(S, dtype=int).copy()
     H = np.asarray(H, dtype=int).copy()
@@ -213,7 +253,7 @@ def asignar_hogares_simple(Q, H, S): # TODO implementar
             pesos[hogares_restantes == 0] = 0.0
 
             if pesos.sum() == 0:
-                print("Error en la asignación!!")
+                print("Error en la asignación, un hogar individual no se pudo asignar!!")
                 break
 
             probs = pesos / pesos.sum()
@@ -226,8 +266,7 @@ def asignar_hogares_simple(Q, H, S): # TODO implementar
 
 
 
-print("Distribucion de parcelas", S)
-print("cantidad de casas", sum(S))
+
 
 
 def asignar_hogares_con_reasignacion(Q, H, S, max_intentos=100_000):
@@ -350,6 +389,7 @@ def plot_stratum_composition_by_parcel(Q, labels=None):
 
 assignments = asignar_hogares_simple(Q, H_h, S)
 graficar_asignacion(assignments, 3)
+
 
 
 

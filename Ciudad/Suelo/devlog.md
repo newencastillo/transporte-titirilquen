@@ -75,3 +75,20 @@ Arreglar la subasta:
 - que hay de intentar considerar el tamaño del terreno como una proporción de la parcela?
 - + pueden haber distintas dinámicas de compra onda comprar terreno disponible o intentar quitar terreno?
 
+de momento urge implementar un modelo greedy
+
+### 14-1
+
+Tranquilidad:
+
+[] Hacer ppt decano
+- que $(!"=)#
+- 
+
+[] Subir cosas al git hub (dificilisimo)
+
+[] Implementar subasta porcentual wtf
+- declarar funcion
+- cuando es distinto a una 
+
+[] Documentar en latex

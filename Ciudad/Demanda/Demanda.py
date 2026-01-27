@@ -185,7 +185,7 @@ poblacion = generar_poblacion_completa(mi_ciudad, CONFIG_DEMANDA)
 def visualizacion1():
     df = pd.DataFrame(poblacion)
     cols = ['id_unico', 'estrato', 'tipo_jornada', 'hora_entrada', 'duracion_horas', 'hora_salida']
-    # display(df[cols].head(40)) # Esto es para notebooks
+    # print(df[cols].head(40)) # Esto es para notebooks
     df[cols].head(40)
 
 
@@ -608,7 +608,7 @@ df_detalle = pd.DataFrame(data_detalle)
 # --- 2. Visualización y Exportación ---
 if not df_detalle.empty:
     print(f"\n--- Detalle Desagregado: {len(df_detalle)} registros encontrados ---")
-    display(df_detalle.head(10))
+    print(df_detalle.head(10))
 
     # === AQUÍ ESTÁ LA LÍNEA PARA EXPORTAR ===
     nombre_archivo = "tabla_detalle_demanda.csv"
@@ -672,7 +672,7 @@ df_viajes = pd.DataFrame(lista_viajes_individuales)
 
 # Visualizar
 print(f"\n--- Total de Viajes Individuales Generados: {len(df_viajes)} ---")
-display(df_viajes.head(10))
+print(df_viajes.head(10))
 
 # Exportar
 nombre_archivo_final = "listado_todos_los_viajes.csv"
